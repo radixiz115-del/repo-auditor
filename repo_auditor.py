@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from dataclasses import dataclass, asdict
@@ -125,12 +126,37 @@ def run(root: Path) -> tuple[int, list[Result]]:
     return round(100 * got / total), results
 
 
+MARKER = "<!-- repo-auditor -->"
+
+
+def to_markdown(name: str, score: int, results: list[Result]) -> str:
+    filled = score // 10
+    bar = "█" * filled + "░" * (10 - filled)
+    lines = [
+        MARKER,
+        f"## 🔍 Repo Auditor: {score}/100",
+        f"`{bar}` **{name}**",
+        "",
+        "| | Проверка | Что сделать |",
+        "|---|---|---|",
+    ]
+    for r in results:
+        hint = "" if r.passed else r.hint.replace("|", "\\|")
+        lines.append(f"| {'✅' if r.passed else '❌'} | {r.name} | {hint} |")
+    failed = sum(not r.passed for r in results)
+    lines += ["", f"_Не пройдено проверок: {failed} из {len(results)}._" if failed else "_Все проверки пройдены 🎉_"]
+    return "\n".join(lines) + "\n"
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Проверка гигиены репозитория")
     ap.add_argument("path", nargs="?", default=".", help="путь к репозиторию")
-    ap.add_argument("--json", action="store_true", help="вывод в JSON")
+    ap.add_argument("--format", choices=["text", "json", "markdown"], default="text", help="формат вывода")
+    ap.add_argument("--json", action="store_true", help="то же, что --format json")
     ap.add_argument("--fail-under", type=int, default=0, help="код выхода 1, если оценка ниже порога (для CI)")
+    ap.add_argument("--github-output", action="store_true", help="записать score в $GITHUB_OUTPUT")
     args = ap.parse_args(argv)
+    fmt = "json" if args.json else args.format
 
     root = Path(args.path).resolve()
     if not root.is_dir():
@@ -138,8 +164,10 @@ def main(argv=None) -> int:
         return 2
 
     score, results = run(root)
-    if args.json:
+    if fmt == "json":
         print(json.dumps({"score": score, "checks": [asdict(r) for r in results]}, ensure_ascii=False, indent=2))
+    elif fmt == "markdown":
+        print(to_markdown(root.name, score, results), end="")
     else:
         print(f"\nАудит: {root.name}\n" + "-" * 40)
         for r in results:
@@ -147,6 +175,11 @@ def main(argv=None) -> int:
             if not r.passed:
                 print(f"      → {r.hint}")
         print("-" * 40 + f"\nОценка: {score}/100\n")
+
+    out = os.environ.get("GITHUB_OUTPUT")
+    if args.github_output and out:
+        with open(out, "a", encoding="utf-8") as f:
+            f.write(f"score={score}\n")
     return 1 if score < args.fail_under else 0
 
 

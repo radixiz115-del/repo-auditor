@@ -1,0 +1,67 @@
+name: "Repo Auditor"
+description: "Проверяет гигиену репозитория (README, лицензия, CI, тесты, секреты) и пишет оценку 0-100 в комментарий к PR."
+author: "radixiz115-del"
+branding:
+  icon: "check-circle"
+  color: "green"
+
+inputs:
+  path:
+    description: "Путь к проверяемой папке"
+    default: "."
+  fail-under:
+    description: "Упасть, если оценка ниже этого значения (0 = не падать)"
+    default: "0"
+  comment:
+    description: "Писать отчёт комментарием в pull request (true/false)"
+    default: "true"
+  github-token:
+    description: "Токен для комментария (нужен permission pull-requests: write)"
+    default: ${{ github.token }}
+
+outputs:
+  score:
+    description: "Оценка репозитория 0-100"
+    value: ${{ steps.audit.outputs.score }}
+
+runs:
+  using: "composite"
+  steps:
+    - id: audit
+      shell: bash
+      env:
+        INPUT_PATH: ${{ inputs.path }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        python3 "$ACTION_PATH/repo_auditor.py" "$INPUT_PATH" \
+          --format markdown --github-output > "$RUNNER_TEMP/repo-auditor.md"
+        cat "$RUNNER_TEMP/repo-auditor.md" >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Comment on pull request
+      if: inputs.comment == 'true' && github.event_name == 'pull_request'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        REPO: ${{ github.repository }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+      run: |
+        ID=$(gh api "repos/$REPO/issues/$PR_NUMBER/comments" --paginate \
+          --jq '.[] | select(.body | contains("<!-- repo-auditor -->")) | .id' | head -n1) || true
+        if [ -n "$ID" ]; then
+          gh api -X PATCH "repos/$REPO/issues/comments/$ID" -F body=@"$RUNNER_TEMP/repo-auditor.md" > /dev/null \
+            || echo "::warning::Не удалось обновить комментарий (PR из форка или нет прав)"
+        else
+          gh api -X POST "repos/$REPO/issues/$PR_NUMBER/comments" -F body=@"$RUNNER_TEMP/repo-auditor.md" > /dev/null \
+            || echo "::warning::Не удалось создать комментарий (PR из форка или нет прав)"
+        fi
+
+    - name: Check threshold
+      shell: bash
+      env:
+        SCORE: ${{ steps.audit.outputs.score }}
+        THRESHOLD: ${{ inputs.fail-under }}
+      run: |
+        if [ "$SCORE" -lt "$THRESHOLD" ]; then
+          echo "::error::Оценка $SCORE ниже порога $THRESHOLD"
+          exit 1
+        fi
