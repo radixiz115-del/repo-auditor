@@ -51,6 +51,24 @@ class AuditorTests(unittest.TestCase):
         self.assertEqual(ra.main([str(root), "--fail-under", "90"]), 1)
         self.assertEqual(ra.main([str(root)]), 0)
 
+    def test_markdown_report(self):
+        root = make_repo({"x.txt": "hi"})
+        score, results = ra.run(root)
+        md = ra.to_markdown("demo", score, results)
+        self.assertIn(ra.MARKER, md)
+        self.assertIn(f"{score}/100", md)
+        self.assertIn("❌", md)
+
+    def test_github_output(self):
+        import os
+        out = Path(tempfile.mkdtemp()) / "out.txt"
+        os.environ["GITHUB_OUTPUT"] = str(out)
+        try:
+            ra.main([str(make_repo({"x.txt": "hi"})), "--format", "markdown", "--github-output"])
+        finally:
+            del os.environ["GITHUB_OUTPUT"]
+        self.assertRegex(out.read_text(), r"score=\d+")
+
 
 if __name__ == "__main__":
     unittest.main()
