@@ -1,3 +1,5 @@
+[![CI](https://github.com/radixiz115-del/repo-auditor/actions/workflows/ci.yml/badge.svg)](https://github.com/radixiz115-del/repo-auditor/actions/workflows/ci.yml)
+
 # repo-auditor
 
 Быстрая проверка «гигиены» репозитория: README, лицензия, .gitignore, CI, тесты, секреты, большие файлы. Выдаёт оценку 0–100 и конкретные советы, что починить.
